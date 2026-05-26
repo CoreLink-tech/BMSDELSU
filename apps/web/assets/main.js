@@ -190,6 +190,65 @@
     `;
   }
 
+  function isPexelsImage(url) {
+    return typeof url === "string" && url.indexOf("images.pexels.com/") !== -1;
+  }
+
+  function optimizeImageUrl(url, width, quality) {
+    if (!url || !isPexelsImage(url)) {
+      return url || "";
+    }
+
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.set("auto", "compress");
+      parsed.searchParams.set("cs", "tinysrgb");
+      parsed.searchParams.set("fm", "webp");
+      parsed.searchParams.set("q", String(quality || 70));
+      parsed.searchParams.set("w", String(width));
+      parsed.searchParams.set("dpr", "1");
+      return parsed.toString();
+    } catch (error) {
+      return url;
+    }
+  }
+
+  function getResponsiveImageSource(imageLike, options) {
+    const source = typeof imageLike === "string" ? { url: imageLike } : imageLike || {};
+    const url = source.url || source.imageUrl || "";
+    const widths = (options && options.widths) || [];
+    const defaultWidth =
+      (options && options.defaultWidth) || (widths.length ? widths[widths.length - 1] : 1200);
+    const quality = (options && options.quality) || 70;
+
+    return {
+      src: optimizeImageUrl(url, defaultWidth, quality),
+      srcset: isPexelsImage(url)
+        ? widths
+            .map(function (width) {
+              return optimizeImageUrl(url, width, quality) + " " + width + "w";
+            })
+            .join(", ")
+        : "",
+      sizes: (options && options.sizes) || "100vw",
+      alt: source.alt || source.imageAlt || "",
+    };
+  }
+
+  function renderResponsiveImage(imageLike, options) {
+    const config = options || {};
+    const source = getResponsiveImageSource(imageLike, config);
+    const className = config.className ? ` class="${config.className}"` : "";
+    const alt = source.alt || config.alt || "";
+    const loading = config.loading ? ` loading="${config.loading}"` : "";
+    const decoding = config.decoding ? ` decoding="${config.decoding}"` : ` decoding="async"`;
+    const fetchPriority = config.fetchpriority ? ` fetchpriority="${config.fetchpriority}"` : "";
+    const srcset = source.srcset ? ` srcset="${source.srcset}"` : "";
+    const sizes = source.srcset ? ` sizes="${source.sizes}"` : "";
+
+    return `<img${className} src="${source.src}"${srcset}${sizes} alt="${alt}"${loading}${decoding}${fetchPriority} />`;
+  }
+
   function renderHeroSlides() {
     const images =
       data.heroImages && data.heroImages.length
@@ -198,17 +257,26 @@
 
     return images
       .map(function (image, index) {
-        const imageUrl = image.url || image;
-        const imageAlt = image.alt || data.site.name + " hero image";
+        const source = getResponsiveImageSource(image, {
+          widths: [640, 960, 1280, 1600],
+          defaultWidth: 1280,
+          quality: 68,
+          sizes: "100vw",
+        });
 
         return `
-          <div
-            class="home-hero__slide${index === 0 ? " is-active" : ""}"
-            data-hero-slide
-            role="img"
-            aria-label="${imageAlt}"
-            style="background-image: url('${imageUrl}')"
-          ></div>
+          <div class="home-hero__slide${index === 0 ? " is-active" : ""}" data-hero-slide>
+            <img
+              class="home-hero__slide-image"
+              alt="${source.alt || data.site.name + " hero image"}"
+              ${index === 0 ? `src="${source.src}"` : `data-src="${source.src}"`}
+              ${source.srcset ? (index === 0 ? `srcset="${source.srcset}"` : `data-srcset="${source.srcset}"`) : ""}
+              ${source.srcset ? (index === 0 ? `sizes="${source.sizes}"` : `data-sizes="${source.sizes}"`) : ""}
+              loading="${index === 0 ? "eager" : "lazy"}"
+              decoding="async"
+              ${index === 0 ? 'fetchpriority="high"' : ""}
+            />
+          </div>
         `;
       })
       .join("");
@@ -430,7 +498,20 @@
             <p><strong>Prof. Ejiro O. Akpogheneta</strong><br /><span class="small-text">Dean, Faculty of Basic Medical Sciences</span></p>
           </div>
           <div class="panel-card dean-photo">
-            <img src="${data.deanImageUrl}" alt="Dean of the Faculty of Basic Medical Sciences" />
+            ${renderResponsiveImage(
+              {
+                url: data.deanImageUrl,
+                alt: "Dean of the Faculty of Basic Medical Sciences",
+              },
+              {
+                className: "dean-photo__image",
+                loading: "lazy",
+                widths: [480, 720, 960],
+                defaultWidth: 720,
+                quality: 72,
+                sizes: "(max-width: 1024px) 100vw, 42vw",
+              }
+            )}
             <div class="dean-photo__caption">
               <strong>Prof. E.O. Akpogheneta</strong>
               <div class="small-text">Dean, Faculty of Basic Medical Sciences</div>
@@ -757,12 +838,14 @@
                   ${
                     item.imageUrl
                       ? `
-                        <img
-                          class="gallery-card__image"
-                          src="${item.imageUrl}"
-                          alt="${item.imageAlt || item.title}"
-                          loading="lazy"
-                        />
+                        ${renderResponsiveImage(item, {
+                          className: "gallery-card__image",
+                          loading: "lazy",
+                          widths: [420, 640, 900, 1200],
+                          defaultWidth: 640,
+                          quality: 68,
+                          sizes: "(max-width: 720px) 100vw, (max-width: 1180px) 50vw, 33vw",
+                        })}
                         ${item.isPlaceholder ? '<span class="gallery-card__badge">Placeholder</span>' : ""}
                       `
                       : `
@@ -1073,15 +1156,53 @@
     const transitionDuration = 2800;
     const cycleDuration = 11000;
 
+    function hydrateHeroSlide(slide) {
+      const image = slide ? slide.querySelector(".home-hero__slide-image") : null;
+
+      if (!image || image.dataset.isHydrated === "true") {
+        return;
+      }
+
+      const src = image.getAttribute("data-src");
+      const srcset = image.getAttribute("data-srcset");
+      const sizes = image.getAttribute("data-sizes");
+
+      if (src) {
+        image.src = src;
+      }
+
+      if (srcset) {
+        image.srcset = srcset;
+      }
+
+      if (sizes) {
+        image.sizes = sizes;
+      }
+
+      image.dataset.isHydrated = "true";
+    }
+
     slides.forEach(function (slide, index) {
       slide.classList.toggle("is-active", index === 0);
       slide.classList.remove("is-leaving");
+
+      if (index === 0) {
+        const image = slide.querySelector(".home-hero__slide-image");
+        if (image) {
+          image.dataset.isHydrated = "true";
+        }
+      }
     });
+
+    hydrateHeroSlide(slides[1]);
 
     window.setInterval(function () {
       const currentSlide = slides[activeIndex];
       const nextIndex = (activeIndex + 1) % slides.length;
       const nextSlide = slides[nextIndex];
+      const upcomingSlide = slides[(nextIndex + 1) % slides.length];
+
+      hydrateHeroSlide(nextSlide);
 
       currentSlide.classList.add("is-leaving");
       currentSlide.classList.remove("is-active");
@@ -1093,6 +1214,7 @@
         currentSlide.classList.remove("is-leaving");
       }, transitionDuration);
 
+      hydrateHeroSlide(upcomingSlide);
       activeIndex = nextIndex;
     }, cycleDuration);
   }
@@ -1124,7 +1246,16 @@
         return;
       }
 
-      image.src = executive.imageUrl || "";
+      const source = getResponsiveImageSource(executive, {
+        widths: [420, 640, 900],
+        defaultWidth: 640,
+        quality: 70,
+        sizes: "(max-width: 1024px) 100vw, 45vw",
+      });
+
+      image.src = source.src;
+      image.srcset = source.srcset;
+      image.sizes = source.srcset ? source.sizes : "";
       image.alt = executive.imageAlt || executive.name;
       role.textContent = executive.role;
       name.textContent = executive.name;
