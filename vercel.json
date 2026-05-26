@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/apps/web/index.html"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "/apps/web/assets/:path*"
+    },
+    {
+      "source": "/:page(about|contact|departments|gallery|staff|executives).html",
+      "destination": "/apps/web/:page.html"
+    }
+  ]
+}
